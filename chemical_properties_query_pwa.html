@@ -1,0 +1,2845 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>化学物性查询</title>
+    
+    <!-- PWA 配置 -->
+    <link rel="manifest" href="./manifest.json">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="物性查询">
+    <link rel="apple-touch-icon" href="./icon-192.png">
+    
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family: "Microsoft YaHei", sans-serif; background:#f5f7fa; min-height:100vh; }
+        
+        .header { background:linear-gradient(135deg, #667eea, #764ba2); color:white; padding:15px; position:sticky; top:0; z-index:100; box-shadow:0 2px 10px rgba(0,0,0,0.2); }
+        .header h1 { font-size:20px; margin-bottom:8px; }
+        .header .subtitle { font-size:12px; opacity:0.8; margin-bottom:10px; }
+        .search-row { display:flex; gap:8px; flex-wrap:wrap; }
+        .search-input { flex:1; min-width:150px; padding:10px 15px; border:2px solid rgba(255,255,255,0.3); border-radius:20px; background:rgba(255,255,255,0.95); font-size:14px; }
+        select { padding:8px 10px; border:2px solid rgba(255,255,255,0.3); border-radius:15px; background:rgba(255,255,255,0.95); font-size:13px; }
+        .btn { padding:8px 15px; background:rgba(255,255,255,0.2); color:white; border:2px solid rgba(255,255,255,0.5); border-radius:15px; cursor:pointer; font-size:13px; white-space:nowrap; }
+        .btn:hover { background:rgba(255,255,255,0.3); }
+        
+        .container { padding:15px; }
+        .count { background:white; padding:12px; border-radius:8px; margin-bottom:15px; font-size:13px; color:#666; box-shadow:0 2px 5px rgba(0,0,0,0.05); }
+        
+        .list { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px; }
+        .card { background:white; padding:15px; border-radius:10px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.08); transition:all 0.3s; }
+        .card:hover { box-shadow:0 4px 15px rgba(0,0,0,0.15); transform:translateY(-2px); }
+        .card-name { font-size:16px; font-weight:bold; color:#333; margin-bottom:5px; }
+        .card-en { font-size:13px; color:#666; margin-bottom:5px; }
+        .card-cas { font-size:11px; color:#999; }
+        
+        .detail { display:none; background:white; padding:20px; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.08); }
+        .back-btn { display:inline-block; padding:10px 20px; background:#667eea; color:white; border:none; border-radius:5px; cursor:pointer; margin-bottom:15px; font-size:14px; }
+        
+        .prop-section { margin:20px 0; }
+        .prop-title { font-size:15px; font-weight:bold; color:#667eea; border-bottom:2px solid #667eea; padding-bottom:8px; margin-bottom:12px; }
+        .prop-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px; }
+        .prop-item { background:#f8f9fa; padding:10px; border-radius:6px; }
+        .prop-label { font-size:12px; color:#666; margin-bottom:3px; }
+        .prop-value { font-size:14px; font-weight:bold; color:#333; }
+        .prop-unit { font-size:10px; color:#999; margin-left:3px; }
+        
+        .tag { display:inline-block; padding:3px 10px; border-radius:10px; font-size:12px; margin-top:10px; }
+        .tag-verified { background:#4caf50; color:white; }
+        .tag-pending { background:#ff9800; color:white; }
+        
+        .empty { text-align:center; padding:40px; color:#999; }
+        
+        @media (max-width:768px) {
+            .list { grid-template-columns:1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧪 化学物性查询</h1>
+        <div class="subtitle">90种化合物 | 40项物性</div>
+        <div class="search-row">
+            <input type="text" class="search-input" id="searchInput" placeholder="搜索名称、CAS号、分子式..." onkeypress="if(event.key==='Enter')search()">
+            <select id="categoryFilter" onchange="search()">
+                <option value="">全部分类</option>
+                <option value="nonpolar_solvents">非极性溶剂</option>
+                <option value="halogenated_solvents">卤代烃</option>
+                <option value="ether_solvents">醚类</option>
+                <option value="ketone_solvents">酮类</option>
+                <option value="ester_solvents">酯类</option>
+                <option value="alcohol_solvents">醇类</option>
+                <option value="polar_aprotic_solvents">极性非质子</option>
+                <option value="nylon_chain">尼龙产业链</option>
+                <option value="polymer_monomers">聚合物单体</option>
+                <option value="elastomer_monomers">弹性体单体</option>
+                <option value="inorganics">无机物</option>
+            </select>
+            <button class="btn" onclick="search()">🔍</button>
+            <button class="btn" onclick="loadAll()">全部</button>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="count" id="countInfo">加载中...</div>
+        <div class="list" id="compoundList"></div>
+        <div class="detail" id="detailView"></div>
+    </div>
+    
+    <script>
+        // PWA: 注册Service Worker
+        if ("serviceWorker" in navigator) {
+            window.addEventListener("load", function() {
+                navigator.serviceWorker.register("./sw.js").then(function(reg) {
+                    console.log("✅ Service Worker 注册成功:", reg.scope);
+                }).catch(function(err) {
+                    console.log("❌ Service Worker 注册失败:", err);
+                });
+            });
+        }
+        
+        // 数据
+        const COMPOUNDS = [
+  {
+    "name_cn": "正己烷",
+    "name_en": "n-Hexane",
+    "cas": "110-54-3",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C6H14",
+      "mw": 86.18,
+      "density_g_ml": 0.6606,
+      "bp_c": 68.7,
+      "mp_c": -95.3,
+      "refractive_index": 1.375
+    },
+    "thermal": {
+      "tc_c": 234.5,
+      "pc_mpa": 3.02,
+      "flash_point_c": -22,
+      "lel_vol_percent": 1.1,
+      "uel_vol_percent": 7.5,
+      "dh_vap_kj_mol": 31.8
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.0095,
+      "logp": 3.57,
+      "dielectric_constant": 1.89
+    },
+    "safety": {
+      "ld50_mg_kg": 25000,
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp",
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "hexane"
+  },
+  {
+    "name_cn": "正庚烷",
+    "name_en": "n-Heptane",
+    "cas": "142-82-5",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C7H16",
+      "mw": 100.2,
+      "density_g_ml": 0.6838,
+      "bp_c": 98.4,
+      "mp_c": -90.6,
+      "refractive_index": 1.387
+    },
+    "thermal": {
+      "tc_c": 268.1,
+      "pc_mpa": 2.74,
+      "flash_point_c": -4,
+      "lel_vol_percent": 1.0,
+      "uel_vol_percent": 6.7,
+      "dh_vap_kj_mol": 36.6
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.0029,
+      "logp": 4.66,
+      "dielectric_constant": 1.92
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "heptane"
+  },
+  {
+    "name_cn": "环己烷",
+    "name_en": "Cyclohexane",
+    "cas": "110-82-7",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C6H12",
+      "mw": 84.16,
+      "density_g_ml": 0.7785,
+      "bp_c": 80.7,
+      "mp_c": 6.5,
+      "refractive_index": 1.426
+    },
+    "thermal": {
+      "tc_c": 280.5,
+      "pc_mpa": 4.08,
+      "flash_point_c": -20,
+      "lel_vol_percent": 1.3,
+      "uel_vol_percent": 8.0,
+      "dh_vap_kj_mol": 33.1
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.055,
+      "logp": 3.44,
+      "dielectric_constant": 2.02
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "cyclohexane"
+  },
+  {
+    "name_cn": "苯",
+    "name_en": "Benzene",
+    "cas": "71-43-2",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C6H6",
+      "mw": 78.11,
+      "density_g_ml": 0.8765,
+      "bp_c": 80.1,
+      "mp_c": 5.5,
+      "refractive_index": 1.501
+    },
+    "thermal": {
+      "tc_c": 288.9,
+      "pc_mpa": 4.89,
+      "flash_point_c": -11,
+      "lel_vol_percent": 1.2,
+      "uel_vol_percent": 7.8,
+      "dh_vap_kj_mol": 33.9
+    },
+    "solubility": {
+      "water_solubility_g_l": 1.8,
+      "logp": 2.13,
+      "dielectric_constant": 2.28
+    },
+    "safety": {
+      "ld50_mg_kg": 930,
+      "iarc_class": "1",
+      "ghs_hazard": "致癌物"
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "benzene"
+  },
+  {
+    "name_cn": "甲苯",
+    "name_en": "Toluene",
+    "cas": "108-88-3",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C7H8",
+      "mw": 92.14,
+      "density_g_ml": 0.8669,
+      "bp_c": 110.6,
+      "mp_c": -95,
+      "refractive_index": 1.497
+    },
+    "thermal": {
+      "tc_c": 318.6,
+      "pc_mpa": 4.11,
+      "flash_point_c": 4,
+      "lel_vol_percent": 1.1,
+      "uel_vol_percent": 7.1,
+      "dh_vap_kj_mol": 38.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.52,
+      "logp": 2.73,
+      "dielectric_constant": 2.38
+    },
+    "safety": {
+      "ld50_mg_kg": 5000,
+      "iarc_class": "3"
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "toluene"
+  },
+  {
+    "name_cn": "二氯甲烷",
+    "name_en": "Dichloromethane",
+    "cas": "75-09-2",
+    "category": "halogenated_solvents",
+    "basic": {
+      "formula": "CH2Cl2",
+      "mw": 84.93,
+      "density_g_ml": 1.326,
+      "bp_c": 40.0,
+      "mp_c": -96.7,
+      "refractive_index": 1.424
+    },
+    "thermal": {
+      "tc_c": 237,
+      "pc_mpa": 6.08,
+      "flash_point_c": null,
+      "dh_vap_kj_mol": 28.6
+    },
+    "solubility": {
+      "water_solubility_g_l": 13.0,
+      "logp": 1.25,
+      "dielectric_constant": 8.93
+    },
+    "safety": {
+      "ld50_mg_kg": 1600,
+      "iarc_class": "2A"
+    },
+    "data_sources": [
+      "NIST",
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "dcm"
+  },
+  {
+    "name_cn": "三氯甲烷",
+    "name_en": "Chloroform",
+    "cas": "67-66-3",
+    "category": "halogenated_solvents",
+    "basic": {
+      "formula": "CHCl3",
+      "mw": 119.38,
+      "density_g_ml": 1.489,
+      "bp_c": 61.2,
+      "mp_c": -63.5,
+      "refractive_index": 1.446
+    },
+    "thermal": {
+      "tc_c": 263.2,
+      "pc_mpa": 5.47,
+      "dh_vap_kj_mol": 31.4
+    },
+    "solubility": {
+      "water_solubility_g_l": 8.0,
+      "logp": 1.97,
+      "dielectric_constant": 4.81
+    },
+    "safety": {
+      "ld50_mg_kg": 908,
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "chloroform"
+  },
+  {
+    "name_cn": "四氢呋喃",
+    "name_en": "THF",
+    "cas": "109-99-9",
+    "category": "ether_solvents",
+    "basic": {
+      "formula": "C4H8O",
+      "mw": 72.11,
+      "density_g_ml": 0.889,
+      "bp_c": 66.0,
+      "mp_c": -108.4,
+      "refractive_index": 1.405
+    },
+    "thermal": {
+      "tc_c": 268,
+      "pc_mpa": 5.19,
+      "flash_point_c": -14,
+      "lel_vol_percent": 1.8,
+      "uel_vol_percent": 11.8,
+      "dh_vap_kj_mol": 32.0
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": 0.46,
+      "dielectric_constant": 7.52
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "thf"
+  },
+  {
+    "name_cn": "乙醚",
+    "name_en": "Diethyl ether",
+    "cas": "60-29-7",
+    "category": "ether_solvents",
+    "basic": {
+      "formula": "C4H10O",
+      "mw": 74.12,
+      "density_g_ml": 0.7134,
+      "bp_c": 34.6,
+      "mp_c": -116.3,
+      "refractive_index": 1.353
+    },
+    "thermal": {
+      "tc_c": 193.6,
+      "pc_mpa": 3.64,
+      "flash_point_c": -45,
+      "lel_vol_percent": 1.9,
+      "uel_vol_percent": 36.0,
+      "dh_vap_kj_mol": 26.5
+    },
+    "solubility": {
+      "water_solubility_g_l": 69,
+      "logp": 0.89,
+      "dielectric_constant": 4.34
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "diethyl_ether"
+  },
+  {
+    "name_cn": "丙酮",
+    "name_en": "Acetone",
+    "cas": "67-64-1",
+    "category": "ketone_solvents",
+    "basic": {
+      "formula": "C3H6O",
+      "mw": 58.08,
+      "density_g_ml": 0.7845,
+      "bp_c": 56.0,
+      "mp_c": -94.9,
+      "refractive_index": 1.359
+    },
+    "thermal": {
+      "tc_c": 235.0,
+      "pc_mpa": 4.69,
+      "flash_point_c": -20,
+      "lel_vol_percent": 2.5,
+      "uel_vol_percent": 12.8,
+      "dh_vap_kj_mol": 31.0
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.24,
+      "dielectric_constant": 20.7
+    },
+    "safety": {
+      "ld50_mg_kg": 5800
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "acetone"
+  },
+  {
+    "name_cn": "甲乙酮",
+    "name_en": "MEK",
+    "cas": "78-93-3",
+    "category": "ketone_solvents",
+    "basic": {
+      "formula": "C4H8O",
+      "mw": 72.11,
+      "density_g_ml": 0.805,
+      "bp_c": 79.6,
+      "mp_c": -86.7,
+      "refractive_index": 1.379
+    },
+    "thermal": {
+      "tc_c": 262,
+      "pc_mpa": 4.24,
+      "flash_point_c": -6,
+      "lel_vol_percent": 1.4,
+      "uel_vol_percent": 11.4,
+      "dh_vap_kj_mol": 34.8
+    },
+    "solubility": {
+      "water_solubility_g_l": 290,
+      "logp": 0.29,
+      "dielectric_constant": 18.5
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "mek"
+  },
+  {
+    "name_cn": "乙酸乙酯",
+    "name_en": "Ethyl acetate",
+    "cas": "141-78-6",
+    "category": "ester_solvents",
+    "basic": {
+      "formula": "C4H8O2",
+      "mw": 88.11,
+      "density_g_ml": 0.902,
+      "bp_c": 77.1,
+      "mp_c": -83.6,
+      "refractive_index": 1.372
+    },
+    "thermal": {
+      "tc_c": 250.1,
+      "pc_mpa": 3.83,
+      "flash_point_c": -4,
+      "lel_vol_percent": 2.0,
+      "uel_vol_percent": 11.5,
+      "dh_vap_kj_mol": 35.6
+    },
+    "solubility": {
+      "water_solubility_g_l": 83,
+      "logp": 0.73,
+      "dielectric_constant": 6.02
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "ethyl_acetate"
+  },
+  {
+    "name_cn": "甲醇",
+    "name_en": "Methanol",
+    "cas": "67-56-1",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "CH4O",
+      "mw": 32.04,
+      "density_g_ml": 0.7914,
+      "bp_c": 64.7,
+      "mp_c": -97.6,
+      "refractive_index": 1.328
+    },
+    "thermal": {
+      "tc_c": 239.4,
+      "pc_mpa": 8.08,
+      "flash_point_c": 11,
+      "lel_vol_percent": 6.0,
+      "uel_vol_percent": 36.0,
+      "dh_vap_kj_mol": 37.4
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.77,
+      "dielectric_constant": 33.0
+    },
+    "safety": {
+      "ld50_mg_kg": 5628
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "methanol"
+  },
+  {
+    "name_cn": "乙醇",
+    "name_en": "Ethanol",
+    "cas": "64-17-5",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "C2H6O",
+      "mw": 46.07,
+      "density_g_ml": 0.7893,
+      "bp_c": 78.4,
+      "mp_c": -114.1,
+      "refractive_index": 1.361
+    },
+    "thermal": {
+      "tc_c": 241.6,
+      "pc_mpa": 6.14,
+      "flash_point_c": 13,
+      "lel_vol_percent": 3.3,
+      "uel_vol_percent": 19.0,
+      "dh_vap_kj_mol": 42.3
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.31,
+      "dielectric_constant": 25.3
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "ethanol"
+  },
+  {
+    "name_cn": "异丙醇",
+    "name_en": "Isopropanol",
+    "cas": "67-63-0",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "C3H8O",
+      "mw": 60.1,
+      "density_g_ml": 0.7855,
+      "bp_c": 82.6,
+      "mp_c": -88,
+      "refractive_index": 1.377
+    },
+    "thermal": {
+      "tc_c": 235.2,
+      "pc_mpa": 4.76,
+      "flash_point_c": 12,
+      "lel_vol_percent": 2.0,
+      "uel_vol_percent": 12.0,
+      "dh_vap_kj_mol": 44.0
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": 0.05,
+      "dielectric_constant": 20.3
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "isopropanol"
+  },
+  {
+    "name_cn": "N,N-二甲基甲酰胺",
+    "name_en": "DMF",
+    "cas": "68-12-2",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C3H7NO",
+      "mw": 73.09,
+      "density_g_ml": 0.9445,
+      "bp_c": 153.0,
+      "mp_c": -61,
+      "refractive_index": 1.43
+    },
+    "thermal": {
+      "tc_c": 374,
+      "pc_mpa": 4.41,
+      "flash_point_c": 58,
+      "dh_vap_kj_mol": 47.5
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -1.01,
+      "dielectric_constant": 38.3
+    },
+    "safety": {
+      "ld50_mg_kg": 2800,
+      "iarc_class": "2A"
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "dmf"
+  },
+  {
+    "name_cn": "二甲亚砜",
+    "name_en": "DMSO",
+    "cas": "67-68-5",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C2H6OS",
+      "mw": 78.13,
+      "density_g_ml": 1.092,
+      "bp_c": 189.0,
+      "mp_c": 18.5,
+      "refractive_index": 1.479
+    },
+    "thermal": {
+      "tc_c": 432,
+      "pc_mpa": 5.65,
+      "flash_point_c": 95,
+      "dh_vap_kj_mol": 52.9
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -1.35,
+      "dielectric_constant": 47.2
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "dmso"
+  },
+  {
+    "name_cn": "乙腈",
+    "name_en": "Acetonitrile",
+    "cas": "75-05-8",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C2H3N",
+      "mw": 41.05,
+      "density_g_ml": 0.786,
+      "bp_c": 81.6,
+      "mp_c": -44,
+      "refractive_index": 1.344
+    },
+    "thermal": {
+      "tc_c": 274.7,
+      "pc_mpa": 4.88,
+      "flash_point_c": 6,
+      "lel_vol_percent": 3.0,
+      "uel_vol_percent": 16.0,
+      "dh_vap_kj_mol": 32.9
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.34,
+      "dielectric_constant": 37.5
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "acetonitrile"
+  },
+  {
+    "name_cn": "己内酰胺",
+    "name_en": "Caprolactam",
+    "cas": "105-60-2",
+    "category": "nylon_chain",
+    "basic": {
+      "formula": "C6H11NO",
+      "mw": 113.16,
+      "density_g_ml": 1.02,
+      "bp_c": 270.8,
+      "mp_c": 69.2,
+      "appearance": "白色结晶固体"
+    },
+    "thermal": {
+      "flash_point_c": 125,
+      "dh_vap_kj_mol": 52.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 870,
+      "logp": 0.08
+    },
+    "safety": {
+      "ld50_mg_kg": 1210
+    },
+    "data_sources": [
+      "Sigma-Aldrich",
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "cpl"
+  },
+  {
+    "name_cn": "己二胺",
+    "name_en": "Hexamethylenediamine",
+    "cas": "124-09-4",
+    "category": "nylon_chain",
+    "basic": {
+      "formula": "C6H16N2",
+      "mw": 116.21,
+      "density_g_ml": 0.89,
+      "bp_c": 204.6,
+      "mp_c": 42,
+      "appearance": "白色结晶固体"
+    },
+    "solubility": {
+      "water_solubility_g_l": "易溶",
+      "logp": 0.35
+    },
+    "safety": {
+      "ld50_mg_kg": 750
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "hmda"
+  },
+  {
+    "name_cn": "己二酸",
+    "name_en": "Adipic acid",
+    "cas": "124-04-9",
+    "category": "nylon_chain",
+    "basic": {
+      "formula": "C6H10O4",
+      "mw": 146.14,
+      "density_g_ml": 1.36,
+      "mp_c": 152,
+      "bp_c": 337.5,
+      "appearance": "白色结晶固体"
+    },
+    "solubility": {
+      "water_solubility_g_l": 14.2,
+      "logp": 0.08
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "adipic_acid"
+  },
+  {
+    "name_cn": "环己酮",
+    "name_en": "Cyclohexanone",
+    "cas": "108-94-1",
+    "category": "nylon_chain",
+    "basic": {
+      "formula": "C6H10O",
+      "mw": 98.15,
+      "density_g_ml": 0.9478,
+      "bp_c": 155.6,
+      "mp_c": -31.2,
+      "refractive_index": 1.45
+    },
+    "thermal": {
+      "flash_point_c": 44,
+      "lel_vol_percent": 1.1,
+      "uel_vol_percent": 9.4,
+      "dh_vap_kj_mol": 45.5
+    },
+    "solubility": {
+      "water_solubility_g_l": 25,
+      "logp": 0.81,
+      "dielectric_constant": 18.0
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "cyclohexanone"
+  },
+  {
+    "name_cn": "水",
+    "name_en": "Water",
+    "cas": "7732-18-5",
+    "category": "inorganics",
+    "basic": {
+      "formula": "H2O",
+      "mw": 18.02,
+      "density_g_ml": 0.9982,
+      "bp_c": 100.0,
+      "mp_c": 0.0,
+      "refractive_index": 1.333
+    },
+    "thermal": {
+      "tc_c": 373.95,
+      "pc_mpa": 22.064,
+      "dh_vap_kj_mol": 40.66
+    },
+    "solubility": {
+      "dielectric_constant": 78.4
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "water"
+  },
+  {
+    "name_cn": "氨",
+    "name_en": "Ammonia",
+    "cas": "7664-41-7",
+    "category": "inorganics",
+    "basic": {
+      "formula": "NH3",
+      "mw": 17.03,
+      "density_g_ml": 0.682,
+      "bp_c": -33.34,
+      "mp_c": -77.73
+    },
+    "thermal": {
+      "tc_c": 132.4,
+      "pc_mpa": 11.28,
+      "dh_vap_kj_mol": 23.35
+    },
+    "solubility": {
+      "water_solubility_g_l": "易溶",
+      "dielectric_constant": 22.0
+    },
+    "safety": {
+      "ld50_mg_kg": 350
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "ammonia"
+  },
+  {
+    "name_cn": "尿素",
+    "name_en": "Urea",
+    "cas": "57-13-6",
+    "category": "inorganics",
+    "basic": {
+      "formula": "CH4N2O",
+      "mw": 60.06,
+      "density_g_ml": 1.32,
+      "mp_c": 133.3,
+      "appearance": "白色结晶固体"
+    },
+    "solubility": {
+      "water_solubility_g_l": 1079
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "urea"
+  },
+  {
+    "name_cn": "正辛烷",
+    "name_en": "n-Octane",
+    "cas": "111-65-9",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C8H18",
+      "mw": 114.23,
+      "density_g_ml": 0.7025,
+      "bp_c": 125.6,
+      "mp_c": -56.8,
+      "refractive_index": 1.398
+    },
+    "thermal": {
+      "tc_c": 295.6,
+      "pc_mpa": 2.49,
+      "flash_point_c": 13,
+      "lel_vol_percent": 1.0,
+      "uel_vol_percent": 6.5
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.0007,
+      "logp": 5.18
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "octane"
+  },
+  {
+    "name_cn": "邻二甲苯",
+    "name_en": "o-Xylene",
+    "cas": "95-47-6",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C8H10",
+      "mw": 106.17,
+      "density_g_ml": 0.88,
+      "bp_c": 144.4,
+      "mp_c": -25.2,
+      "refractive_index": 1.505
+    },
+    "thermal": {
+      "tc_c": 357.2,
+      "pc_mpa": 3.73,
+      "flash_point_c": 17,
+      "lel_vol_percent": 1.0,
+      "uel_vol_percent": 6.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.175,
+      "logp": 3.12,
+      "dielectric_constant": 2.57
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "oxylene"
+  },
+  {
+    "name_cn": "间二甲苯",
+    "name_en": "m-Xylene",
+    "cas": "108-38-3",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C8H10",
+      "mw": 106.17,
+      "density_g_ml": 0.868,
+      "bp_c": 139.1,
+      "mp_c": -47.4,
+      "refractive_index": 1.497
+    },
+    "thermal": {
+      "tc_c": 343.9,
+      "pc_mpa": 3.54,
+      "flash_point_c": 27,
+      "lel_vol_percent": 1.1,
+      "uel_vol_percent": 6.4
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.161,
+      "logp": 3.2
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "mxylene"
+  },
+  {
+    "name_cn": "对二甲苯",
+    "name_en": "p-Xylene",
+    "cas": "106-42-3",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C8H10",
+      "mw": 106.17,
+      "density_g_ml": 0.861,
+      "bp_c": 138.4,
+      "mp_c": 13.3,
+      "refractive_index": 1.496
+    },
+    "thermal": {
+      "tc_c": 343.1,
+      "pc_mpa": 3.51,
+      "flash_point_c": 27,
+      "lel_vol_percent": 1.1,
+      "uel_vol_percent": 7.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.185,
+      "logp": 3.15
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "pxylene"
+  },
+  {
+    "name_cn": "乙苯",
+    "name_en": "Ethylbenzene",
+    "cas": "100-41-4",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C8H10",
+      "mw": 106.17,
+      "density_g_ml": 0.867,
+      "bp_c": 136.2,
+      "mp_c": -95.9,
+      "refractive_index": 1.496
+    },
+    "thermal": {
+      "tc_c": 344.0,
+      "pc_mpa": 3.61,
+      "flash_point_c": 20,
+      "lel_vol_percent": 0.8,
+      "uel_vol_percent": 6.7
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.161,
+      "logp": 3.15
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "ethylbenzene"
+  },
+  {
+    "name_cn": "苯乙烯",
+    "name_en": "Styrene",
+    "cas": "100-42-5",
+    "category": "polymer_monomers",
+    "basic": {
+      "formula": "C8H8",
+      "mw": 104.15,
+      "density_g_ml": 0.909,
+      "bp_c": 145.2,
+      "mp_c": -30.6,
+      "refractive_index": 1.547
+    },
+    "thermal": {
+      "flash_point_c": 31,
+      "lel_vol_percent": 0.9,
+      "uel_vol_percent": 6.8
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.31,
+      "logp": 2.95
+    },
+    "safety": {
+      "iarc_class": "2A"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "styrene"
+  },
+  {
+    "name_cn": "1,2-二氯乙烷",
+    "name_en": "1,2-Dichloroethane",
+    "cas": "107-06-2",
+    "category": "halogenated_solvents",
+    "basic": {
+      "formula": "C2H4Cl2",
+      "mw": 98.96,
+      "density_g_ml": 1.253,
+      "bp_c": 83.5,
+      "mp_c": -35.4,
+      "refractive_index": 1.445
+    },
+    "thermal": {
+      "tc_c": 288.4,
+      "pc_mpa": 5.31,
+      "flash_point_c": 13,
+      "lel_vol_percent": 6.2,
+      "uel_vol_percent": 15.9
+    },
+    "solubility": {
+      "water_solubility_g_l": 8.6,
+      "logp": 1.48,
+      "dielectric_constant": 10.6
+    },
+    "safety": {
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST",
+      "CoolProp"
+    ],
+    "data_quality": "verified",
+    "id": "dce"
+  },
+  {
+    "name_cn": "三氯乙烯",
+    "name_en": "Trichloroethylene",
+    "cas": "79-01-6",
+    "category": "halogenated_solvents",
+    "basic": {
+      "formula": "C2HCl3",
+      "mw": 131.39,
+      "density_g_ml": 1.464,
+      "bp_c": 87.2,
+      "mp_c": -73
+    },
+    "solubility": {
+      "water_solubility_g_l": 1.1,
+      "logp": 2.42,
+      "dielectric_constant": 3.4
+    },
+    "safety": {
+      "iarc_class": "1"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "tce"
+  },
+  {
+    "name_cn": "四氯乙烯",
+    "name_en": "Tetrachloroethylene",
+    "cas": "127-18-4",
+    "category": "halogenated_solvents",
+    "basic": {
+      "formula": "C2Cl4",
+      "mw": 165.83,
+      "density_g_ml": 1.622,
+      "bp_c": 121.1,
+      "mp_c": -22.4
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.15,
+      "logp": 3.4,
+      "dielectric_constant": 2.3
+    },
+    "safety": {
+      "iarc_class": "2A"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "perchloroethylene"
+  },
+  {
+    "name_cn": "1,4-二氧六环",
+    "name_en": "1,4-Dioxane",
+    "cas": "123-91-1",
+    "category": "ether_solvents",
+    "basic": {
+      "formula": "C4H8O2",
+      "mw": 88.11,
+      "density_g_ml": 1.033,
+      "bp_c": 101.1,
+      "mp_c": 11.8,
+      "refractive_index": 1.422
+    },
+    "thermal": {
+      "tc_c": 312,
+      "pc_mpa": 5.15,
+      "flash_point_c": 12,
+      "lel_vol_percent": 2.0,
+      "uel_vol_percent": 22.0
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.27,
+      "dielectric_constant": 2.21
+    },
+    "safety": {
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "dioxane"
+  },
+  {
+    "name_cn": "甲基叔丁基醚",
+    "name_en": "MTBE",
+    "cas": "1634-04-4",
+    "category": "ether_solvents",
+    "basic": {
+      "formula": "C5H12O",
+      "mw": 88.15,
+      "density_g_ml": 0.741,
+      "bp_c": 55.2,
+      "mp_c": -109,
+      "refractive_index": 1.369
+    },
+    "thermal": {
+      "flash_point_c": -28,
+      "lel_vol_percent": 1.6,
+      "uel_vol_percent": 8.4
+    },
+    "solubility": {
+      "water_solubility_g_l": 48,
+      "logp": 1.06
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "mtbe"
+  },
+  {
+    "name_cn": "甲基异丁基酮",
+    "name_en": "MIBK",
+    "cas": "108-10-1",
+    "category": "ketone_solvents",
+    "basic": {
+      "formula": "C6H12O",
+      "mw": 100.16,
+      "density_g_ml": 0.802,
+      "bp_c": 118.0,
+      "mp_c": -84.7,
+      "refractive_index": 1.396
+    },
+    "thermal": {
+      "flash_point_c": 23,
+      "lel_vol_percent": 1.2,
+      "uel_vol_percent": 8.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 17,
+      "logp": 1.31,
+      "dielectric_constant": 13.1
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "mibk"
+  },
+  {
+    "name_cn": "乙酸丁酯",
+    "name_en": "Butyl acetate",
+    "cas": "123-86-4",
+    "category": "ester_solvents",
+    "basic": {
+      "formula": "C6H12O2",
+      "mw": 116.16,
+      "density_g_ml": 0.882,
+      "bp_c": 126.1,
+      "mp_c": -78,
+      "refractive_index": 1.394
+    },
+    "thermal": {
+      "flash_point_c": 22,
+      "lel_vol_percent": 1.2,
+      "uel_vol_percent": 7.5
+    },
+    "solubility": {
+      "water_solubility_g_l": 6.8,
+      "logp": 1.78
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "butyl_acetate"
+  },
+  {
+    "name_cn": "正丁醇",
+    "name_en": "n-Butanol",
+    "cas": "71-36-3",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "C4H10O",
+      "mw": 74.12,
+      "density_g_ml": 0.81,
+      "bp_c": 117.7,
+      "mp_c": -89.8,
+      "refractive_index": 1.399
+    },
+    "thermal": {
+      "tc_c": 290,
+      "pc_mpa": 4.42,
+      "flash_point_c": 35,
+      "lel_vol_percent": 1.4,
+      "uel_vol_percent": 11.2
+    },
+    "solubility": {
+      "water_solubility_g_l": 73,
+      "logp": 0.88,
+      "dielectric_constant": 17.8
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "nbutanol"
+  },
+  {
+    "name_cn": "乙二醇",
+    "name_en": "Ethylene glycol",
+    "cas": "107-21-1",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "C2H6O2",
+      "mw": 62.07,
+      "density_g_ml": 1.1132,
+      "bp_c": 197.3,
+      "mp_c": -12.9,
+      "refractive_index": 1.432
+    },
+    "thermal": {
+      "tc_c": 447,
+      "pc_mpa": 7.55,
+      "flash_point_c": 111
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -1.36,
+      "dielectric_constant": 41.4
+    },
+    "safety": {
+      "ld50_mg_kg": 4700
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "eg"
+  },
+  {
+    "name_cn": "丙三醇",
+    "name_en": "Glycerol",
+    "cas": "56-81-5",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "C3H8O3",
+      "mw": 92.09,
+      "density_g_ml": 1.261,
+      "bp_c": 290,
+      "mp_c": 17.8,
+      "refractive_index": 1.475
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -1.76,
+      "dielectric_constant": 47.0
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "glycerol"
+  },
+  {
+    "name_cn": "N-甲基吡咯烷酮",
+    "name_en": "NMP",
+    "cas": "872-50-4",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C5H9NO",
+      "mw": 99.13,
+      "density_g_ml": 1.028,
+      "bp_c": 202,
+      "mp_c": -24,
+      "refractive_index": 1.468
+    },
+    "thermal": {
+      "flash_point_c": 91
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.46,
+      "dielectric_constant": 32.0
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "nmp"
+  },
+  {
+    "name_cn": "N,N-二甲基乙酰胺",
+    "name_en": "DMAC",
+    "cas": "127-19-5",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C4H9NO",
+      "mw": 87.12,
+      "density_g_ml": 0.937,
+      "bp_c": 165,
+      "mp_c": -20,
+      "refractive_index": 1.436
+    },
+    "thermal": {
+      "flash_point_c": 70
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.77,
+      "dielectric_constant": 37.8
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "dmac"
+  },
+  {
+    "name_cn": "环丁砜",
+    "name_en": "Sulfolane",
+    "cas": "126-33-0",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C4H8O2S",
+      "mw": 120.17,
+      "density_g_ml": 1.261,
+      "bp_c": 285,
+      "mp_c": 27.5,
+      "refractive_index": 1.484
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "dielectric_constant": 43.3
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "sulfolane"
+  },
+  {
+    "name_cn": "硝基苯",
+    "name_en": "Nitrobenzene",
+    "cas": "98-95-3",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C6H5NO2",
+      "mw": 123.11,
+      "density_g_ml": 1.204,
+      "bp_c": 210.9,
+      "mp_c": 5.7,
+      "refractive_index": 1.556
+    },
+    "thermal": {
+      "flash_point_c": 88
+    },
+    "solubility": {
+      "water_solubility_g_l": 1.9,
+      "logp": 1.85,
+      "dielectric_constant": 35.0
+    },
+    "safety": {
+      "ld50_mg_kg": 600,
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "nitrobenzene"
+  },
+  {
+    "name_cn": "吡啶",
+    "name_en": "Pyridine",
+    "cas": "110-86-1",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C5H5N",
+      "mw": 79.1,
+      "density_g_ml": 0.983,
+      "bp_c": 115.2,
+      "mp_c": -41.6,
+      "refractive_index": 1.509
+    },
+    "thermal": {
+      "flash_point_c": 20,
+      "lel_vol_percent": 1.8,
+      "uel_vol_percent": 12.4
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": 0.65,
+      "dielectric_constant": 13.3
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "pyridine"
+  },
+  {
+    "name_cn": "甲酸",
+    "name_en": "Formic acid",
+    "cas": "64-18-6",
+    "category": "other_organics",
+    "basic": {
+      "formula": "CH2O2",
+      "mw": 46.03,
+      "density_g_ml": 1.22,
+      "bp_c": 100.8,
+      "mp_c": 8.4,
+      "refractive_index": 1.371
+    },
+    "thermal": {
+      "flash_point_c": 50
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.54,
+      "dielectric_constant": 58.5
+    },
+    "safety": {
+      "ld50_mg_kg": 1100
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "formic_acid"
+  },
+  {
+    "name_cn": "乙酸",
+    "name_en": "Acetic acid",
+    "cas": "64-19-7",
+    "category": "other_organics",
+    "basic": {
+      "formula": "C2H4O2",
+      "mw": 60.05,
+      "density_g_ml": 1.049,
+      "bp_c": 118.1,
+      "mp_c": 16.6,
+      "refractive_index": 1.372
+    },
+    "thermal": {
+      "tc_c": 318.7,
+      "pc_mpa": 5.78,
+      "flash_point_c": 39,
+      "lel_vol_percent": 4.0,
+      "uel_vol_percent": 19.9
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.31,
+      "dielectric_constant": 6.2
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "acetic_acid"
+  },
+  {
+    "name_cn": "苯酚",
+    "name_en": "Phenol",
+    "cas": "108-95-2",
+    "category": "other_organics",
+    "basic": {
+      "formula": "C6H6O",
+      "mw": 94.11,
+      "density_g_ml": 1.071,
+      "bp_c": 181.7,
+      "mp_c": 40.5,
+      "refractive_index": 1.54
+    },
+    "thermal": {
+      "tc_c": 421.3,
+      "pc_mpa": 6.13,
+      "flash_point_c": 79
+    },
+    "solubility": {
+      "water_solubility_g_l": 84,
+      "logp": 1.46,
+      "dielectric_constant": 12.4
+    },
+    "safety": {
+      "ld50_mg_kg": 317,
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "phenol"
+  },
+  {
+    "name_cn": "己二腈",
+    "name_en": "Adiponitrile",
+    "cas": "111-69-3",
+    "category": "nylon_chain",
+    "basic": {
+      "formula": "C6H8N2",
+      "mw": 108.14,
+      "density_g_ml": 0.962,
+      "bp_c": 295,
+      "mp_c": 1.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 50,
+      "logp": -0.2
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "adiponitrile"
+  },
+  {
+    "name_cn": "己内酯",
+    "name_en": "Caprolactone",
+    "cas": "502-44-3",
+    "category": "nylon_chain",
+    "basic": {
+      "formula": "C6H10O2",
+      "mw": 114.14,
+      "density_g_ml": 1.03,
+      "bp_c": 235,
+      "mp_c": -1.0,
+      "refractive_index": 1.461
+    },
+    "solubility": {
+      "water_solubility_g_l": 250,
+      "logp": 0.5
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "caprolactone"
+  },
+  {
+    "name_cn": "1,6-己二醇",
+    "name_en": "1,6-Hexanediol",
+    "cas": "629-11-8",
+    "category": "nylon_chain",
+    "basic": {
+      "formula": "C6H14O2",
+      "mw": 118.18,
+      "density_g_ml": 0.96,
+      "bp_c": 250,
+      "mp_c": 42
+    },
+    "solubility": {
+      "water_solubility_g_l": 500,
+      "logp": 0.02
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "hexanediol"
+  },
+  {
+    "name_cn": "环己醇",
+    "name_en": "Cyclohexanol",
+    "cas": "108-93-0",
+    "category": "nylon_chain",
+    "basic": {
+      "formula": "C6H12O",
+      "mw": 100.16,
+      "density_g_ml": 0.962,
+      "bp_c": 161.8,
+      "mp_c": 25.4,
+      "refractive_index": 1.462
+    },
+    "thermal": {
+      "flash_point_c": 68,
+      "lel_vol_percent": 1.2
+    },
+    "solubility": {
+      "water_solubility_g_l": 37,
+      "logp": 0.96
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "cyclohexanol"
+  },
+  {
+    "name_cn": "乙烯",
+    "name_en": "Ethylene",
+    "cas": "74-85-1",
+    "category": "polymer_monomers",
+    "basic": {
+      "formula": "C2H4",
+      "mw": 28.05,
+      "density_g_ml": 0.00126,
+      "bp_c": -103.7,
+      "mp_c": -169.2
+    },
+    "thermal": {
+      "tc_c": 9.2,
+      "pc_mpa": 5.04
+    },
+    "thermal_properties": {
+      "dh_vap_kj_mol": 13.5
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.12
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "ethylene"
+  },
+  {
+    "name_cn": "丙烯",
+    "name_en": "Propylene",
+    "cas": "115-07-1",
+    "category": "polymer_monomers",
+    "basic": {
+      "formula": "C3H6",
+      "mw": 42.08,
+      "density_g_ml": 0.00194,
+      "bp_c": -47.6,
+      "mp_c": -185.2
+    },
+    "thermal": {
+      "tc_c": 91.9,
+      "pc_mpa": 4.6
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.2
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "propylene"
+  },
+  {
+    "name_cn": "氯乙烯",
+    "name_en": "Vinyl chloride",
+    "cas": "75-01-4",
+    "category": "polymer_monomers",
+    "basic": {
+      "formula": "C2H3Cl",
+      "mw": 62.5,
+      "density_g_ml": 0.911,
+      "bp_c": -13.4,
+      "mp_c": -153.8
+    },
+    "thermal": {
+      "tc_c": 142.0,
+      "pc_mpa": 5.6
+    },
+    "solubility": {
+      "water_solubility_g_l": 2.7,
+      "logp": 1.46
+    },
+    "safety": {
+      "iarc_class": "1"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "vinyl_chloride"
+  },
+  {
+    "name_cn": "对苯二甲酸",
+    "name_en": "PTA",
+    "cas": "100-21-0",
+    "category": "polymer_monomers",
+    "basic": {
+      "formula": "C8H6O4",
+      "mw": 166.13,
+      "density_g_ml": 1.51,
+      "mp_c": 300,
+      "appearance": "白色结晶粉末"
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.017,
+      "logp": 1.56
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "pta"
+  },
+  {
+    "name_cn": "双酚A",
+    "name_en": "Bisphenol A",
+    "cas": "80-05-7",
+    "category": "polymer_monomers",
+    "basic": {
+      "formula": "C15H16O2",
+      "mw": 228.29,
+      "density_g_ml": 1.2,
+      "mp_c": 158,
+      "bp_c": 360,
+      "appearance": "白色结晶固体"
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.3,
+      "logp": 3.64
+    },
+    "safety": {
+      "ld50_mg_kg": 2200
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "bpa"
+  },
+  {
+    "name_cn": "1,4-丁二醇",
+    "name_en": "1,4-Butanediol",
+    "cas": "110-63-4",
+    "category": "polymer_monomers",
+    "basic": {
+      "formula": "C4H10O2",
+      "mw": 90.12,
+      "density_g_ml": 1.017,
+      "bp_c": 230,
+      "mp_c": 20.1,
+      "refractive_index": 1.446
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.83
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "bdo"
+  },
+  {
+    "name_cn": "丁二烯",
+    "name_en": "1,3-Butadiene",
+    "cas": "106-99-0",
+    "category": "elastomer_monomers",
+    "basic": {
+      "formula": "C4H6",
+      "mw": 54.09,
+      "density_g_ml": 0.65,
+      "bp_c": -4.4,
+      "mp_c": -108.9
+    },
+    "thermal": {
+      "tc_c": 152.0,
+      "pc_mpa": 4.33,
+      "lel_vol_percent": 2.0,
+      "uel_vol_percent": 12.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.74,
+      "logp": 1.99
+    },
+    "safety": {
+      "iarc_class": "1"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "butadiene"
+  },
+  {
+    "name_cn": "异戊二烯",
+    "name_en": "Isoprene",
+    "cas": "78-79-5",
+    "category": "elastomer_monomers",
+    "basic": {
+      "formula": "C5H8",
+      "mw": 68.12,
+      "density_g_ml": 0.681,
+      "bp_c": 34.1,
+      "mp_c": -146
+    },
+    "thermal": {
+      "tc_c": 187.2,
+      "pc_mpa": 3.85,
+      "flash_point_c": -54
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.078,
+      "logp": 2.82
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "isoprene"
+  },
+  {
+    "name_cn": "丙烯腈",
+    "name_en": "Acrylonitrile",
+    "cas": "107-13-1",
+    "category": "elastomer_monomers",
+    "basic": {
+      "formula": "C3H3N",
+      "mw": 53.06,
+      "density_g_ml": 0.806,
+      "bp_c": 77.3,
+      "mp_c": -83.5,
+      "refractive_index": 1.388
+    },
+    "thermal": {
+      "tc_c": 246.0,
+      "pc_mpa": 4.52,
+      "flash_point_c": -1,
+      "lel_vol_percent": 3.0,
+      "uel_vol_percent": 17.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 79,
+      "logp": 0.25,
+      "dielectric_constant": 33.0
+    },
+    "safety": {
+      "ld50_mg_kg": 78,
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "acrylonitrile"
+  },
+  {
+    "name_cn": "硫酸",
+    "name_en": "Sulfuric acid",
+    "cas": "7664-93-9",
+    "category": "inorganics",
+    "basic": {
+      "formula": "H2SO4",
+      "mw": 98.08,
+      "density_g_ml": 1.841,
+      "bp_c": 337,
+      "mp_c": 10,
+      "appearance": "无色油状液体"
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "dielectric_constant": 100
+    },
+    "safety": {
+      "ld50_mg_kg": 2140
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "sulfuric_acid"
+  },
+  {
+    "name_cn": "双氧水",
+    "name_en": "Hydrogen peroxide",
+    "cas": "7722-84-1",
+    "category": "inorganics",
+    "basic": {
+      "formula": "H2O2",
+      "mw": 34.02,
+      "density_g_ml": 1.45,
+      "bp_c": 150.2,
+      "mp_c": -0.43
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "h2o2"
+  },
+  {
+    "name_cn": "正戊烷",
+    "name_en": "n-Pentane",
+    "cas": "109-66-0",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C5H12",
+      "mw": 72.15,
+      "density_g_ml": 0.626,
+      "bp_c": 36.1,
+      "mp_c": -129.8
+    },
+    "thermal": {
+      "tc_c": 196.6,
+      "pc_mpa": 3.37,
+      "flash_point_c": -49
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.04,
+      "logp": 3.39
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "pentane"
+  },
+  {
+    "name_cn": "正壬烷",
+    "name_en": "n-Nonane",
+    "cas": "111-84-2",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C9H20",
+      "mw": 128.26,
+      "density_g_ml": 0.718,
+      "bp_c": 150.8,
+      "mp_c": -53.5
+    },
+    "thermal": {
+      "tc_c": 321.4,
+      "pc_mpa": 2.29,
+      "flash_point_c": 31
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.0002,
+      "logp": 5.65
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "nonane"
+  },
+  {
+    "name_cn": "正癸烷",
+    "name_en": "n-Decane",
+    "cas": "124-18-5",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C10H22",
+      "mw": 142.28,
+      "density_g_ml": 0.73,
+      "bp_c": 174.1,
+      "mp_c": -29.7
+    },
+    "thermal": {
+      "tc_c": 344.5,
+      "pc_mpa": 2.1,
+      "flash_point_c": 46
+    },
+    "solubility": {
+      "water_solubility_g_l": 5e-05,
+      "logp": 6.25
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "decane"
+  },
+  {
+    "name_cn": "甲基环己烷",
+    "name_en": "Methylcyclohexane",
+    "cas": "108-87-2",
+    "category": "nonpolar_solvents",
+    "basic": {
+      "formula": "C7H14",
+      "mw": 98.19,
+      "density_g_ml": 0.769,
+      "bp_c": 100.9,
+      "mp_c": -126.6
+    },
+    "thermal": {
+      "tc_c": 299.1,
+      "pc_mpa": 3.47,
+      "flash_point_c": -4
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.013,
+      "logp": 3.61
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "methylcyclohexane"
+  },
+  {
+    "name_cn": "四氯化碳",
+    "name_en": "Carbon tetrachloride",
+    "cas": "56-23-5",
+    "category": "halogenated_solvents",
+    "basic": {
+      "formula": "CCl4",
+      "mw": 153.82,
+      "density_g_ml": 1.587,
+      "bp_c": 76.7,
+      "mp_c": -22.9,
+      "refractive_index": 1.461
+    },
+    "thermal": {
+      "tc_c": 283.2,
+      "pc_mpa": 4.56
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.8,
+      "logp": 2.64,
+      "dielectric_constant": 2.23
+    },
+    "safety": {
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "carbon_tetrachloride"
+  },
+  {
+    "name_cn": "氯苯",
+    "name_en": "Chlorobenzene",
+    "cas": "108-90-7",
+    "category": "halogenated_solvents",
+    "basic": {
+      "formula": "C6H5Cl",
+      "mw": 112.56,
+      "density_g_ml": 1.106,
+      "bp_c": 131.7,
+      "mp_c": -45.2,
+      "refractive_index": 1.525
+    },
+    "thermal": {
+      "tc_c": 359.2,
+      "pc_mpa": 4.45,
+      "flash_point_c": 29
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.5,
+      "logp": 2.89,
+      "dielectric_constant": 5.71
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "chlorobenzene"
+  },
+  {
+    "name_cn": "邻二氯苯",
+    "name_en": "o-Dichlorobenzene",
+    "cas": "95-50-1",
+    "category": "halogenated_solvents",
+    "basic": {
+      "formula": "C6H4Cl2",
+      "mw": 147.0,
+      "density_g_ml": 1.306,
+      "bp_c": 180.5,
+      "mp_c": -17.0,
+      "refractive_index": 1.551
+    },
+    "thermal": {
+      "flash_point_c": 66
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.092,
+      "logp": 3.44,
+      "dielectric_constant": 9.93
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "dichlorobenzene_o"
+  },
+  {
+    "name_cn": "二丁醚",
+    "name_en": "Dibutyl ether",
+    "cas": "142-96-1",
+    "category": "ether_solvents",
+    "basic": {
+      "formula": "C8H18O",
+      "mw": 130.23,
+      "density_g_ml": 0.769,
+      "bp_c": 142.2,
+      "mp_c": -95.3,
+      "refractive_index": 1.399
+    },
+    "thermal": {
+      "flash_point_c": 25
+    },
+    "solubility": {
+      "water_solubility_g_l": 0.3,
+      "logp": 3.21
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "dibutyl_ether"
+  },
+  {
+    "name_cn": "苯甲醚",
+    "name_en": "Anisole",
+    "cas": "100-66-3",
+    "category": "ether_solvents",
+    "basic": {
+      "formula": "C7H8O",
+      "mw": 108.14,
+      "density_g_ml": 0.995,
+      "bp_c": 153.8,
+      "mp_c": -37.5,
+      "refractive_index": 1.517
+    },
+    "thermal": {
+      "flash_point_c": 52
+    },
+    "solubility": {
+      "water_solubility_g_l": 1.0,
+      "logp": 2.11,
+      "dielectric_constant": 4.33
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "anisole"
+  },
+  {
+    "name_cn": "戊酮-2",
+    "name_en": "2-Pentanone",
+    "cas": "107-87-9",
+    "category": "ketone_solvents",
+    "basic": {
+      "formula": "C5H10O",
+      "mw": 86.13,
+      "density_g_ml": 0.809,
+      "bp_c": 101.9,
+      "mp_c": -77.8,
+      "refractive_index": 1.39
+    },
+    "thermal": {
+      "flash_point_c": 7
+    },
+    "solubility": {
+      "water_solubility_g_l": 55,
+      "logp": 0.91
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "methyl_propyl_ketone"
+  },
+  {
+    "name_cn": "乙酸异丙酯",
+    "name_en": "Isopropyl acetate",
+    "cas": "108-21-4",
+    "category": "ester_solvents",
+    "basic": {
+      "formula": "C5H10O2",
+      "mw": 102.13,
+      "density_g_ml": 0.873,
+      "bp_c": 88.5,
+      "mp_c": -73.4,
+      "refractive_index": 1.377
+    },
+    "thermal": {
+      "flash_point_c": 2
+    },
+    "solubility": {
+      "water_solubility_g_l": 34,
+      "logp": 1.03
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "isopropyl_acetate"
+  },
+  {
+    "name_cn": "乙酸丙酯",
+    "name_en": "Propyl acetate",
+    "cas": "109-60-4",
+    "category": "ester_solvents",
+    "basic": {
+      "formula": "C5H10O2",
+      "mw": 102.13,
+      "density_g_ml": 0.888,
+      "bp_c": 101.6,
+      "mp_c": -92.5,
+      "refractive_index": 1.384
+    },
+    "thermal": {
+      "flash_point_c": 14
+    },
+    "solubility": {
+      "water_solubility_g_l": 20,
+      "logp": 1.24
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "propyl_acetate"
+  },
+  {
+    "name_cn": "碳酸二甲酯",
+    "name_en": "Dimethyl carbonate",
+    "cas": "616-38-6",
+    "category": "ester_solvents",
+    "basic": {
+      "formula": "C3H6O3",
+      "mw": 90.08,
+      "density_g_ml": 1.073,
+      "bp_c": 90.2,
+      "mp_c": 3.0,
+      "refractive_index": 1.369
+    },
+    "thermal": {
+      "flash_point_c": 17
+    },
+    "solubility": {
+      "water_solubility_g_l": 132,
+      "logp": 0.35,
+      "dielectric_constant": 3.08
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "dimethyl_carbonate"
+  },
+  {
+    "name_cn": "仲丁醇",
+    "name_en": "sec-Butanol",
+    "cas": "78-92-2",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "C4H10O",
+      "mw": 74.12,
+      "density_g_ml": 0.808,
+      "bp_c": 99.5,
+      "mp_c": -114.7,
+      "refractive_index": 1.397
+    },
+    "thermal": {
+      "flash_point_c": 24
+    },
+    "solubility": {
+      "water_solubility_g_l": 290,
+      "logp": 0.61,
+      "dielectric_constant": 15.8
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "sec_butanol"
+  },
+  {
+    "name_cn": "叔丁醇",
+    "name_en": "tert-Butanol",
+    "cas": "75-65-0",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "C4H10O",
+      "mw": 74.12,
+      "density_g_ml": 0.781,
+      "bp_c": 82.3,
+      "mp_c": 25.5,
+      "refractive_index": 1.387
+    },
+    "thermal": {
+      "flash_point_c": 11
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": 0.35,
+      "dielectric_constant": 12.5
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "tert_butanol"
+  },
+  {
+    "name_cn": "苯甲醇",
+    "name_en": "Benzyl alcohol",
+    "cas": "100-51-6",
+    "category": "alcohol_solvents",
+    "basic": {
+      "formula": "C7H8O",
+      "mw": 108.14,
+      "density_g_ml": 1.041,
+      "bp_c": 204.7,
+      "mp_c": -15.4,
+      "refractive_index": 1.54
+    },
+    "solubility": {
+      "water_solubility_g_l": 40,
+      "logp": 1.1,
+      "dielectric_constant": 13.1
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "benzyl_alcohol"
+  },
+  {
+    "name_cn": "硝酸",
+    "name_en": "Nitric acid",
+    "cas": "7697-37-2",
+    "category": "inorganics",
+    "basic": {
+      "formula": "HNO3",
+      "mw": 63.01,
+      "density_g_ml": 1.512,
+      "bp_c": 83.0,
+      "mp_c": -42.0,
+      "appearance": "无色液体"
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶"
+    },
+    "safety": {
+      "ld50_mg_kg": 450
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "nitric_acid"
+  },
+  {
+    "name_cn": "盐酸",
+    "name_en": "Hydrochloric acid",
+    "cas": "7647-01-0",
+    "category": "inorganics",
+    "basic": {
+      "formula": "HCl",
+      "mw": 36.46,
+      "density_g_ml": 1.18,
+      "bp_c": 110.0,
+      "mp_c": -27.3,
+      "appearance": "无色液体"
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶"
+    },
+    "safety": {
+      "ld50_mg_kg": 900
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "hydrochloric_acid"
+  },
+  {
+    "name_cn": "氢氧化钠",
+    "name_en": "Sodium hydroxide",
+    "cas": "1310-73-2",
+    "category": "inorganics",
+    "basic": {
+      "formula": "NaOH",
+      "mw": 40.0,
+      "density_g_ml": 2.13,
+      "mp_c": 323,
+      "bp_c": 1388,
+      "appearance": "白色固体"
+    },
+    "solubility": {
+      "water_solubility_g_l": 1110
+    },
+    "safety": {
+      "ld50_mg_kg": 140
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "sodium_hydroxide"
+  },
+  {
+    "name_cn": "氢氧化钾",
+    "name_en": "Potassium hydroxide",
+    "cas": "1310-58-3",
+    "category": "inorganics",
+    "basic": {
+      "formula": "KOH",
+      "mw": 56.11,
+      "density_g_ml": 2.04,
+      "mp_c": 406,
+      "bp_c": 1327,
+      "appearance": "白色固体"
+    },
+    "solubility": {
+      "water_solubility_g_l": 1120
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "potassium_hydroxide"
+  },
+  {
+    "name_cn": "碳酸钠",
+    "name_en": "Sodium carbonate",
+    "cas": "497-19-8",
+    "category": "inorganics",
+    "basic": {
+      "formula": "Na2CO3",
+      "mw": 105.99,
+      "density_g_ml": 2.54,
+      "mp_c": 851,
+      "appearance": "白色粉末"
+    },
+    "solubility": {
+      "water_solubility_g_l": 221
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "sodium_carbonate"
+  },
+  {
+    "name_cn": "三乙胺",
+    "name_en": "Triethylamine",
+    "cas": "121-44-8",
+    "category": "other_organics",
+    "basic": {
+      "formula": "C6H15N",
+      "mw": 101.19,
+      "density_g_ml": 0.726,
+      "bp_c": 89.3,
+      "mp_c": -114.7,
+      "refractive_index": 1.401
+    },
+    "thermal": {
+      "flash_point_c": -7,
+      "lel_vol_percent": 1.2,
+      "uel_vol_percent": 8.0
+    },
+    "solubility": {
+      "water_solubility_g_l": 112,
+      "logp": 1.45,
+      "dielectric_constant": 2.42
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "triethylamine"
+  },
+  {
+    "name_cn": "苯胺",
+    "name_en": "Aniline",
+    "cas": "62-53-3",
+    "category": "other_organics",
+    "basic": {
+      "formula": "C6H7N",
+      "mw": 93.13,
+      "density_g_ml": 1.022,
+      "bp_c": 184.1,
+      "mp_c": -6.0,
+      "refractive_index": 1.586
+    },
+    "thermal": {
+      "flash_point_c": 70
+    },
+    "solubility": {
+      "water_solubility_g_l": 34,
+      "logp": 0.9,
+      "dielectric_constant": 6.89
+    },
+    "safety": {
+      "ld50_mg_kg": 440,
+      "iarc_class": "3"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "aniline"
+  },
+  {
+    "name_cn": "N,N-二甲基甲酰胺",
+    "name_en": "DMF",
+    "cas": "68-12-2",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C3H7NO",
+      "mw": 73.09,
+      "density_g_ml": 0.9445,
+      "bp_c": 153.0,
+      "mp_c": -61.0,
+      "refractive_index": 1.43
+    },
+    "thermal": {
+      "tc_c": 374.0,
+      "pc_mpa": 4.41,
+      "flash_point_c": 58
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -1.01,
+      "dielectric_constant": 38.3
+    },
+    "safety": {
+      "ld50_mg_kg": 2800,
+      "iarc_class": "2A"
+    },
+    "data_sources": [
+      "NIST",
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "dimethyl_formamide"
+  },
+  {
+    "name_cn": "二甲亚砜",
+    "name_en": "DMSO",
+    "cas": "67-68-5",
+    "category": "polar_aprotic_solvents",
+    "basic": {
+      "formula": "C2H6OS",
+      "mw": 78.13,
+      "density_g_ml": 1.092,
+      "bp_c": 189.0,
+      "mp_c": 18.5,
+      "refractive_index": 1.479
+    },
+    "thermal": {
+      "tc_c": 432.0,
+      "pc_mpa": 5.65,
+      "flash_point_c": 95
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -1.35,
+      "dielectric_constant": 47.2
+    },
+    "data_sources": [
+      "Sigma-Aldrich"
+    ],
+    "data_quality": "verified",
+    "id": "dimethyl_sulfoxide"
+  },
+  {
+    "name_cn": "1,4-二氧六环",
+    "name_en": "1,4-Dioxane",
+    "cas": "123-91-1",
+    "category": "ether_solvents",
+    "basic": {
+      "formula": "C4H8O2",
+      "mw": 88.11,
+      "density_g_ml": 1.033,
+      "bp_c": 101.1,
+      "mp_c": 11.8,
+      "refractive_index": 1.422
+    },
+    "thermal": {
+      "tc_c": 312.0,
+      "pc_mpa": 5.15,
+      "flash_point_c": 12,
+      "lel_vol_percent": 2.0,
+      "uel_vol_percent": 22.0
+    },
+    "solubility": {
+      "water_solubility_g_l": "互溶",
+      "logp": -0.27,
+      "dielectric_constant": 2.21
+    },
+    "safety": {
+      "iarc_class": "2B"
+    },
+    "data_sources": [
+      "NIST"
+    ],
+    "data_quality": "verified",
+    "id": "1,4-dioxane"
+  }
+];
+        
+        console.log("✅ 数据加载成功");
+        console.log("✅ 化合物数量:", COMPOUNDS.length);
+        
+        let currentResults = [];
+        
+        const CATEGORY_NAMES = {
+            "nonpolar_solvents": "非极性溶剂",
+            "halogenated_solvents": "卤代烃",
+            "ether_solvents": "醚类",
+            "ketone_solvents": "酮类",
+            "ester_solvents": "酯类",
+            "alcohol_solvents": "醇类",
+            "polar_aprotic_solvents": "极性非质子",
+            "nylon_chain": "尼龙产业链",
+            "polymer_monomers": "聚合物单体",
+            "elastomer_monomers": "弹性体单体",
+            "inorganics": "无机物"
+        };
+        
+        const LABELS = {
+            "formula":"分子式","mw":"分子量","density_g_ml":"密度","bp_c":"沸点","mp_c":"熔点","refractive_index":"折射率","appearance":"外观",
+            "tc_c":"临界温度","pc_mpa":"临界压力","flash_point_c":"闪点","lel_vol_percent":"爆炸下限","uel_vol_percent":"爆炸上限","dh_vap_kj_mol":"蒸发热",
+            "water_solubility_g_l":"水溶解度","logp":"LogP","dielectric_constant":"介电常数",
+            "viscosity_pa_s":"粘度","surface_tension_n_m":"表面张力","thermal_conductivity_w_mk":"热导率",
+            "density_t_c":"Tc下密度","cp_j_mol_k":"定压热容","enthalpy_j_mol":"焓","entropy_j_mol_k":"熵","gibbs_j_mol":"吉布斯自由能",
+            "ld50_mg_kg":"LD50(口服)","iarc_class":"IARC分类","ghs_hazard":"GHS危险"
+        };
+        
+        const UNITS = {
+            "mw":"g/mol","density_g_ml":"g/mL","bp_c":"℃","mp_c":"℃","refractive_index":"",
+            "tc_c":"℃","pc_mpa":"MPa","flash_point_c":"℃","lel_vol_percent":"vol%","uel_vol_percent":"vol%","dh_vap_kj_mol":"kJ/mol",
+            "water_solubility_g_l":"g/L","logp":"","dielectric_constant":"",
+            "viscosity_pa_s":"Pa·s","surface_tension_n_m":"N/m","thermal_conductivity_w_mk":"W/(m·K)",
+            "density_t_c":"kg/m³","cp_j_mol_k":"J/(mol·K)","enthalpy_j_mol":"J/mol","entropy_j_mol_k":"J/(mol·K)","gibbs_j_mol":"J/mol",
+            "ld50_mg_kg":"mg/kg"
+        };
+        
+        function loadAll() {
+            currentResults = COMPOUNDS;
+            renderList();
+        }
+        
+        function search() {
+            const query = document.getElementById("searchInput").value.toLowerCase().trim();
+            const category = document.getElementById("categoryFilter").value;
+            
+            currentResults = COMPOUNDS.filter(cpd => {
+                if (category && cpd.category !== category) return false;
+                if (query) {
+                    const searchText = [
+                        cpd.name_cn,
+                        cpd.name_en,
+                        cpd.cas,
+                        cpd.basic ? cpd.basic.formula : "",
+                        cpd.id
+                    ].filter(x => x).join(" ").toLowerCase();
+                    
+                    return searchText.includes(query);
+                }
+                return true;
+            });
+            
+            renderList();
+        }
+        
+        function renderList() {
+            const listEl = document.getElementById("compoundList");
+            const countEl = document.getElementById("countInfo");
+            
+            countEl.textContent = "共 " + currentResults.length + " 种化合物";
+            
+            if (currentResults.length === 0) {
+                listEl.innerHTML = "<div class=\"empty\">未找到匹配物质</div>";
+                return;
+            }
+            
+            listEl.innerHTML = currentResults.map((cpd, idx) => {
+                return "<div class=\"card\" onclick=\"showDetail(" + idx + ")\">" +
+                    "<div class=\"card-name\">" + cpd.name_cn + "</div>" +
+                    "<div class=\"card-en\">" + cpd.name_en + "</div>" +
+                    "<div class=\"card-cas\">CAS: " + cpd.cas + " | " + (CATEGORY_NAMES[cpd.category] || cpd.category) + "</div>" +
+                "</div>";
+            }).join("");
+            
+            listEl.style.display = "grid";
+            document.getElementById("detailView").style.display = "none";
+            countEl.style.display = "block";
+        }
+        
+        function showDetail(idx) {
+            const cpd = currentResults[idx];
+            if (!cpd) return;
+            
+            const detailEl = document.getElementById("detailView");
+            
+            let html = "<button class=\"back-btn\" onclick=\"showList()\">← 返回列表</button>";
+            html += "<h2 style=\"margin-bottom:10px;font-size:24px\">" + cpd.name_cn + " (" + cpd.name_en + ")</h2>";
+            html += "<p style=\"color:#666;margin-bottom:20px;\">CAS: " + cpd.cas + " | " + (CATEGORY_NAMES[cpd.category] || cpd.category) + " | ID: " + cpd.id + "</p>";
+            
+            ["basic", "thermal", "solubility", "rheological", "thermodynamic", "safety"].forEach(section => {
+                if (cpd[section]) {
+                    const sectionNames = {"basic":"基础物性","thermal":"热物性","solubility":"溶解性质","rheological":"流变性质","thermodynamic":"热力学性质","safety":"安全参数"};
+                    html += "<div class=\"prop-section\"><div class=\"prop-title\">" + sectionNames[section] + "</div><div class=\"prop-grid\">";
+                    
+                    for (const [key, val] of Object.entries(cpd[section])) {
+                        if (["data_sources", "data_quality", "last_updated"].includes(key)) continue;
+                        const label = LABELS[key] || key;
+                        const unit = UNITS[key] || "";
+                        html += "<div class=\"prop-item\"><div class=\"prop-label\">" + label + "</div><div class=\"prop-value\">" + val + "<span class=\"prop-unit\">" + unit + "</span></div></div>";
+                    }
+                    
+                    html += "</div></div>";
+                }
+            });
+            
+            html += "<div style=\"margin-top:20px;padding-top:20px;border-top:1px solid #e0e0e0;font-size:12px;color:#999;\">";
+            html += "数据来源: " + (cpd.data_sources || []).join(", ") + "<br>";
+            html += "数据质量: <span class=\"tag " + (cpd.data_quality === "verified" ? "tag-verified" : "tag-pending") + "\">" + (cpd.data_quality === "verified" ? "已验证" : "待验证") + "</span>";
+            html += "</div>";
+            
+            detailEl.innerHTML = html;
+            detailEl.style.display = "block";
+            document.getElementById("compoundList").style.display = "none";
+            document.getElementById("countInfo").style.display = "none";
+        }
+        
+        function showList() {
+            document.getElementById("compoundList").style.display = "grid";
+            document.getElementById("detailView").style.display = "none";
+            document.getElementById("countInfo").style.display = "block";
+        }
+        
+        // 初始化
+        window.addEventListener("DOMContentLoaded", function() {
+            loadAll();
+        });
+    </script>
+</body>
+</html>
